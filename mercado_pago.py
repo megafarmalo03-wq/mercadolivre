@@ -10,7 +10,6 @@ import requests
 # Troque o texto abaixo pelo seu token de teste ou producao.
 # Sem token, o app mostra apenas QR Code estatico + codigo de libercao manual.
 ACCESS_TOKEN = "APP_USR-1241304769992786-062223-e46e28076bcb308db533c794ab9ae1ed-3493278878"
-TOKEN_CONFIGURADO = True
 BASE_URL = "https://api.mercadopago.com"
 
 
@@ -19,7 +18,7 @@ def criar_preferencia(valor: float, descricao: str = "Acesso Planilha de Ganhos"
     Cria uma preferencia de pagamento (link de checkout Mercado Pago).
     Retorna dict com: init_point (URL de pagamento), id
     """
-    if not TOKEN_CONFIGURADO:
+    if ACCESS_TOKEN == "APP_USR-1241304769992786-062223-e46e28076bcb308db533c794ab9ae1ed-3493278878":
         return {"erro": "Token nao configurado"}
 
     url = f"{BASE_URL}/checkout/preferences"
@@ -57,7 +56,7 @@ def buscar_pagamentos(external_reference: str):
     Busca pagamentos pela referencia externa.
     Retorna list de dicts com status.
     """
-    if not TOKEN_CONFIGURADO:
+    if ACCESS_TOKEN == "APP_USR-1241304769992786-062223-e46e28076bcb308db533c794ab9ae1ed-3493278878":
         return []
 
     # Mercado Pago nao tem endpoint direto por external_reference na v1 publica.
