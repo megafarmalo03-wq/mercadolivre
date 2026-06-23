@@ -11,7 +11,7 @@ from datetime import datetime
 import calendar
 import openpyxl
 from streamlit.components.v1 import html as st_html
-from mercado_pago import criar_preferencia, ultimo_status, ACCESS_TOKEN
+from mercado_pago import criar_preferencia, ultimo_status, TOKEN_CONFIGURADO
 
 st.set_page_config(page_title="Planilha de Ganhos", layout="wide")
 
@@ -133,7 +133,7 @@ def tela_pagamento():
         st.session_state.pop("usuario_pendente", None)
         st.rerun()
 
-    tem_mp = ACCESS_TOKEN != "COLOQUE_SEU_ACCESS_TOKEN_AQUI"
+    tem_mp = TOKEN_CONFIGURADO
 
     # Gera preferencia Mercado Pago (uma vez por sessao)
     if tem_mp and "mp_preferencia" not in st.session_state:
