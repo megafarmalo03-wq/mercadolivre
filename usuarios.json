@@ -21,7 +21,7 @@
         "nome": "Fabio",
         "senha": "fabio123",
         "planilha": "Planilha de Ganhos - Fabio.xlsx",
-        "pago": true
+        "pago": false
     },
     "francisco": {
         "nome": "Francisco Peixoto Lumi",
