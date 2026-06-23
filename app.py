@@ -1,13 +1,353 @@
 import streamlit as st
 import pandas as pd
+import json
+import os
+import shutil
+import base64
+import io
+import qrcode
+import requests
 from datetime import datetime
 import calendar
 import openpyxl
 from streamlit.components.v1 import html as st_html
+from mercado_pago import criar_preferencia, ultimo_status, ACCESS_TOKEN
 
 st.set_page_config(page_title="Planilha de Ganhos", layout="wide")
 
-# Tabela de lookup da diária (igual ao VLOOKUP do Excel)
+# ========== CONFIGURACOES DE PAGAMENTO ==========
+VALOR_PIX = 20.00
+# Chave PIX: CPF 36785517850 — Diego
+PIX_BR_CODE = "00020126360014BR.GOV.BCB.PIX011036785517850520400005303986540520.005802BR5925Diego AC2 Logistica6009SAOPAULO62070503***6304"
+
+def criar_nova_planilha(caminho):
+    """Cria uma planilha zerada com todas as datas dos meses."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    meses_info = [
+        ("Junho", 6), ("Julho", 7), ("Agosto", 8), ("Setembro", 9),
+        ("Outubro", 10), ("Novembro", 11), ("Dezembro", 12),
+    ]
+    for nome_mes, mes_num in meses_info:
+        ws = wb.create_sheet(title=nome_mes)
+        _, ultimo_dia = calendar.monthrange(2026, mes_num)
+        for dia in range(1, ultimo_dia + 1):
+            dt = datetime(2026, mes_num, dia)
+            r = 3 + dia - 1
+            ws.cell(row=r, column=2, value=dt)
+    wb.save(caminho)
+    wb.close()
+
+
+def garantir_planilha_usuario(caminho):
+    if os.path.exists(caminho):
+        return True
+    criar_nova_planilha(caminho)
+    return True
+
+
+# ========== CONFIGURACOES DE PAGAMENTO ==========
+VALOR_PIX = 20.00
+PIX_CHAVE = "00020126580014BR.GOV.BCB.PIX0136diego@seudominio.com5204000053039865404{valor}5802BR5925Diego AC2 Logistica6009SAOPAULO62070503***6304"  # Pix Copia-e-Cola de exemplo — SUBSTITUA PELO SEU
+
+def gerar_qrcode_pix(valor: float, chave: str = PIX_CHAVE, descricao: str = "Acesso Planilha de Ganhos"):
+    """Gera QR Code do PIX e retorna base64 da imagem."""
+    import qrcode as _qr
+    buf = io.BytesIO()
+    img = _qr.make(chave)
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64}"
+
+
+def marcar_usuario_pago(login: str):
+    usuarios = carregar_usuarios()
+    login = login.strip().lower()
+    if login in usuarios:
+        usuarios[login]["pago"] = True
+        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+
+
+# ========== LOGIN SISTEMA ==========
+USUARIOS_JSON = "usuarios.json"
+
+def carregar_usuarios():
+    try:
+        with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        padrao = {
+            "diego": {"nome": "Diego", "senha": "diego123",
+                       "planilha": "Planilha de Ganhos - Diego.xlsx"}
+        }
+        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+            json.dump(padrao, f, indent=4, ensure_ascii=False)
+        return padrao
+
+
+def criar_usuario(login: str, nome: str, senha: str):
+    login = login.strip().lower()
+    nome = nome.strip()
+    senha = senha.strip()
+    if not login or not nome or not senha:
+        st.error("Preencha todos os campos.")
+        return
+    if len(senha) < 4:
+        st.error("Senha muito curta.")
+        return
+    usuarios = carregar_usuarios()
+    if login in usuarios:
+        st.error("Usuário já existe.")
+        return
+    planilha_nome = f"Planilha de Ganhos - {nome.title()}.xlsx"
+    usuarios[login] = {
+        "nome": nome,
+        "senha": senha,
+        "planilha": planilha_nome
+    }
+    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+        json.dump(usuarios, f, indent=4, ensure_ascii=False)
+    garantir_planilha_usuario(planilha_nome)
+    st.success("Conta criada com sucesso! Faça login.")
+    st.session_state["tela"] = "login"
+    st.rerun()
+
+
+def logout():
+    for chave in ["logado", "usuario", "arquivo_excel", "dados"]:
+        st.session_state.pop(chave, None)
+    st.rerun()
+
+
+def tela_pagamento():
+    user = st.session_state.get("usuario_pendente", {})
+    login_pendente = user.get("login", "")
+
+    # Se ja foi pago (outra aba/admin)
+    usuarios = carregar_usuarios()
+    if usuarios.get(login_pendente, {}).get("pago", False):
+        st.session_state["logado"] = True
+        st.session_state["usuario"] = usuarios[login_pendente]
+        st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
+        st.session_state.pop("usuario_pendente", None)
+        st.rerun()
+
+    tem_mp = ACCESS_TOKEN != "COLOQUE_SEU_ACCESS_TOKEN_AQUI"
+
+    # Gera preferencia Mercado Pago (uma vez por sessao)
+    if tem_mp and "mp_preferencia" not in st.session_state:
+        with st.spinner("Gerando link de pagamento..."):
+            pref = criar_preferencia(VALOR_PIX, referencia=login_pendente)
+        if "erro" not in pref:
+            st.session_state["mp_preferencia"] = pref
+
+    # Gera QR Code fallback
+    if "qr_pix_b64" not in st.session_state:
+        buf = io.BytesIO()
+        img = qrcode.make(PIX_BR_CODE)
+        img.save(buf, format="PNG")
+        st.session_state["qr_pix_b64"] = base64.b64encode(buf.getvalue()).decode("utf-8")
+    qr_b64 = st.session_state["qr_pix_b64"]
+
+    _, c2, _ = st.columns([1, 2.6, 1])
+    with c2:
+        st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center;'><span style='font-size:48px;'>&#x1f512;</span></div>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Acesso Bloqueado</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Efetue o pagamento PIX de <b>R&#36; 20,00</b> para liberar seu acesso.</p>", unsafe_allow_html=True)
+
+        if tem_mp and "mp_preferencia" in st.session_state:
+            link = st.session_state["mp_preferencia"].get("init_point", "")
+            st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><a href="{link}" target="_blank" style="display:inline-block;background:#00b1ea;color:#fff;padding:14px 28px;border-radius:50px;text-decoration:none;font-weight:700;font-size:15px;box-shadow:0 8px 24px rgba(0,177,234,0.35);">Pagar com Mercado Pago</a></div>', unsafe_allow_html=True)
+            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:11px;margin-bottom:16px;'>Após pagar, clique em <b>Verificar Pagamento</b> abaixo.</p>", unsafe_allow_html=True)
+
+            # Verificacao automatica
+            if st.button("&#x1f504; Verificar Pagamento", use_container_width=True):
+                status = ultimo_status(login_pendente)
+                if status == "approved":
+                    marcar_usuario_pago(login_pendente)
+                    st.balloons()
+                    st.success("Pagamento confirmado! Liberando acesso...")
+                    st.session_state["logado"] = True
+                    st.session_state["usuario"] = usuarios[login_pendente]
+                    st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
+                    st.session_state.pop("usuario_pendente", None)
+                    st.session_state.pop("mp_preferencia", None)
+                    st.session_state.pop("qr_pix_b64", None)
+                    st.rerun()
+                elif status in ("pending", "in_process"):
+                    st.info("Pagamento em processamento. Aguarde e tente novamente.")
+                else:
+                    st.warning("Pagamento nao encontrado. Verifique se ja pagou.")
+        else:
+            # Fallback QR Code
+            st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:220px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
+            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
+            st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{PIX_BR_CODE}</span></div>', unsafe_allow_html=True)
+            st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde a liberação.</p>", unsafe_allow_html=True)
+
+        # Codigo admin fallback
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        codigo = st.text_input("Codigo de Liberacao", placeholder="Codigo do administrador", key="codigo_lib", label_visibility="collapsed")
+        if codigo.strip().lower() == "liberar2026":
+            marcar_usuario_pago(login_pendente)
+            st.success("Acesso liberado! Entrando...")
+            st.session_state["logado"] = True
+            st.session_state["usuario"] = usuarios[login_pendente]
+            st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
+            st.session_state.pop("usuario_pendente", None)
+            st.session_state.pop("mp_preferencia", None)
+            st.session_state.pop("qr_pix_b64", None)
+            st.rerun()
+        elif codigo.strip():
+            st.error("Codigo invalido.")
+
+        if st.button("Voltar ao Login", use_container_width=True):
+            st.session_state["tela"] = "login"
+            st.session_state.pop("usuario_pendente", None)
+            st.session_state.pop("mp_preferencia", None)
+            st.session_state.pop("qr_pix_b64", None)
+            st.rerun()
+
+
+def tela_login():
+    if "tela" not in st.session_state:
+        st.session_state["tela"] = "login"
+
+    # CSS global + orbes
+    st.markdown("""
+    <style>
+    .stApp { background: #0f0f1a !important; }
+    .main { background: #0f0f1a !important; }
+    .block-container { padding-top: 0 !important; padding-bottom: 0 !important; }
+    .orb {
+        position: fixed; border-radius: 50%; filter: blur(120px);
+        z-index: -1; pointer-events: none;
+    }
+    .orb-1 { width: 340px; height: 340px; background: #7c3aed; top: -80px; left: -80px; opacity: 0.5; }
+    .orb-2 { width: 300px; height: 300px; background: #db2777; bottom: -80px; right: -80px; opacity: 0.5; }
+    .orb-3 { width: 220px; height: 220px; background: #f59e0b; top: 50%%; left: 55%%; opacity: 0.3; }
+    input[type="text"], input[type="password"] {
+        background: rgba(255,255,255,0.85) !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 12px !important; color: #000000 !important;
+        padding: 12px 14px !important; font-size: 14px !important;
+    }
+    input[type="text"]::placeholder, input[type="password"]::placeholder {
+        color: #888888 !important;
+    }
+    button[kind="primary"] {
+        background: rgba(255,255,255,0.92) !important; color: #111 !important;
+        border: none !important; border-radius: 50px !important;
+        font-weight: 700 !important; font-size: 14px !important;
+        letter-spacing: 1.5px; text-transform: uppercase;
+        padding: 12px 28px !important;
+        box-shadow: 0 8px 24px rgba(255,255,255,0.12) !important;
+    }
+    button[kind="primary"]:hover {
+        background: #fff !important;
+    }
+    button[kind="secondary"] {
+        background: rgba(255,255,255,0.08) !important;
+        border: 1px solid rgba(255,255,255,0.20) !important;
+        border-radius: 50px !important;
+        color: #fff !important;
+        font-weight: 600 !important; font-size: 13px !important;
+        letter-spacing: 1px; text-transform: uppercase;
+        padding: 10px 28px !important;
+    }
+    button[kind="secondary"]:hover {
+        background: rgba(255,255,255,0.16) !important;
+        border-color: rgba(255,255,255,0.35) !important;
+    }
+    </style>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10vh'></div>", unsafe_allow_html=True)
+
+    # Card glassmorphism puro HTML/Div
+    st.markdown("""
+    <div style="max-width:780px;margin:0 auto;background:rgba(255,255,255,0.04);backdrop-filter:blur(20px);border-radius:24px;border:1px solid rgba(255,255,255,0.10);box-shadow:0 40px 80px rgba(0,0,0,0.5);">
+        <div style="display:flex;flex-wrap:wrap;">
+            <div style="flex:1;min-width:260px;background:rgba(255,255,255,0.03);border-right:1px solid rgba(255,255,255,0.07);padding:48px 36px;display:flex;flex-direction:column;justify-content:center;">
+                <div style="color:#fff;font-size:22px;font-weight:800;letter-spacing:3px;margin-bottom:12px;text-transform:uppercase;">Bem-vindo</div>
+                <div style="color:#a5b4fc;font-size:13px;margin-bottom:40px;line-height:1.5;">Acesse sua planilha de ganhos diários ou crie uma nova conta para começar.</div>
+                <div id="btn-area-left"></div>
+            </div>
+            <div style="flex:1.25;min-width:300px;padding:48px 36px;display:flex;flex-direction:column;justify-content:center;">
+                <div id="form-area-right"></div>
+            </div>
+        </div>
+    </div>
+    <div style='height:8vh'></div>
+    """, unsafe_allow_html=True)
+
+    # Conteudo real interativo
+    c1, c2, c3 = st.columns([1, 5.5, 1])
+    with c2:
+        if st.session_state.get("tela") == "pagamento":
+            tela_pagamento()
+            return
+
+        col_left, col_right = st.columns([1, 1.25])
+
+        with col_left:
+            st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+            if st.session_state["tela"] == "login":
+                st.markdown("<div style='color:#9ca3af;font-size:11px;margin-bottom:10px;'>Ainda não tem conta?</div>", unsafe_allow_html=True)
+                if st.button("Criar Conta", key="btn_criar"):
+                    st.session_state["tela"] = "cadastro"
+                    st.rerun()
+            else:
+                st.markdown("<div style='color:#9ca3af;font-size:11px;margin-bottom:10px;'>Já tem conta?</div>", unsafe_allow_html=True)
+                if st.button("Fazer Login", key="btn_login"):
+                    st.session_state["tela"] = "login"
+                    st.rerun()
+
+        with col_right:
+            if st.session_state["tela"] == "login":
+                st.markdown("<div style='color:#fff;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px;text-align:center;'>Faça Login</div>", unsafe_allow_html=True)
+                login = st.text_input("Usuário", placeholder="usuario", key="login_user", label_visibility="collapsed")
+                senha = st.text_input("Senha", type="password", placeholder="senha", key="login_senha", label_visibility="collapsed")
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                usuarios = carregar_usuarios()
+                if st.button("Entrar", type="primary", use_container_width=True, key="btn_entrar"):
+                    user = usuarios.get(login.strip().lower())
+                    if user and user["senha"] == senha:
+                        if not user.get("pago", False):
+                            st.session_state["tela"] = "pagamento"
+                            st.session_state["usuario_pendente"] = {**user, "login": login.strip().lower()}
+                            st.rerun()
+                        st.session_state["logado"] = True
+                        st.session_state["usuario"] = user
+                        st.session_state["arquivo_excel"] = user["planilha"]
+                        st.rerun()
+                    else:
+                        st.error("Usuário ou senha incorretos.")
+                st.markdown("<div style='color:#9ca3af;font-size:10px;text-align:center;margin-top:12px;'>AC2 Logistica &bull; 2026</div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div style='color:#fff;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px;text-align:center;'>Criar Conta</div>", unsafe_allow_html=True)
+                novo_user = st.text_input("Usuário", placeholder="usuario", key="cad_user", label_visibility="collapsed")
+                novo_nome = st.text_input("Nome Completo", placeholder="nome completo", key="cad_nome", label_visibility="collapsed")
+                nova_senha = st.text_input("Senha", type="password", placeholder="senha", key="cad_senha", label_visibility="collapsed")
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                if st.button("Cadastrar", type="primary", use_container_width=True, key="btn_cadastrar"):
+                    criar_usuario(novo_user, novo_nome, nova_senha)
+
+
+if "logado" not in st.session_state or not st.session_state["logado"]:
+    tela_login()
+    st.stop()
+
+ARQUIVO_EXCEL = st.session_state["arquivo_excel"]
+
+# ========== FIM LOGIN ==========
+
+# Tabela de lookup da diaria (igual ao VLOOKUP do Excel)
 DIARIA_LOOKUP = [
     (0, 240), (101, 260), (126, 280), (151, 300), (176, 320),
     (201, 340), (226, 360), (251, 380), (276, 400), (301, 420),
@@ -73,7 +413,7 @@ MESES = {
 
 
 def importar_excel_original():
-    wb = openpyxl.load_workbook("Planilha de Ganhos.xlsx", data_only=True)
+    wb = openpyxl.load_workbook(ARQUIVO_EXCEL, data_only=True)
     dados = {}
     for sheet in wb.sheetnames:
         ws = wb[sheet]
@@ -133,7 +473,6 @@ def criar_vazio_para_mes(ano: int, mes_num: int):
     return df
 
 
-@st.cache_data(show_spinner=False)
 def ler_planilha():
     try:
         return importar_excel_original()
@@ -209,14 +548,13 @@ def resumo(df_calc):
 
 
 def salvar_no_excel_original(dados_dict):
-    wb = openpyxl.load_workbook("Planilha de Ganhos.xlsx", data_only=False)
+    wb = openpyxl.load_workbook(ARQUIVO_EXCEL, data_only=False)
     for sheet in wb.sheetnames:
         mes = sheet.strip().lower()
         if mes not in dados_dict:
             continue
         df = dados_dict[mes]
         ws = wb[sheet]
-        # Cria um mapa data -> linha a partir do Excel
         data_para_linha = {}
         for r_excel in range(4, ws.max_row + 1):
             v_data = ws.cell(row=r_excel, column=2).value
@@ -246,17 +584,26 @@ def salvar_no_excel_original(dados_dict):
             ws.cell(row=r, column=17).value = float(bes) if pd.notna(bes) else None
             car = row["carro"]
             ws.cell(row=r, column=18).value = float(car) if pd.notna(car) else None
-    wb.save("Planilha de Ganhos.xlsx")
+    wb.save(ARQUIVO_EXCEL)
     wb.close()
-    # Limpa cache para recarregar dados atualizados
-    ler_planilha.clear()
 
 
 # =================== MAIN ===================
 
+# Garante que a planilha do usuario exista
+garantir_planilha_usuario(ARQUIVO_EXCEL)
+
 inicializar_dados()
 
-st.title("Planilha de Ganhos - AC2")
+# Header com logout
+h1, h2 = st.columns([6, 1])
+with h1:
+    st.title("Planilha de Ganhos - AC2")
+with h2:
+    usuario_nome = st.session_state["usuario"].get("nome", "Usuário")
+    st.markdown(f"<div style='text-align:right; padding-top:18px;'><b>{usuario_nome}</b></div>", unsafe_allow_html=True)
+    if st.button("Sair 🔒", use_container_width=True):
+        logout()
 
 # Mes atual como padrao
 mes_atual = datetime.now().month

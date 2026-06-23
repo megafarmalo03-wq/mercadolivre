@@ -1,0 +1,32 @@
+{
+    "diego": {
+        "nome": "Diego",
+        "senha": "diego123",
+        "planilha": "Planilha de Ganhos - Diego.xlsx",
+        "pago": true
+    },
+    "joao": {
+        "nome": "João",
+        "senha": "joao123",
+        "planilha": "Planilha de Ganhos - Joao.xlsx",
+        "pago": false
+    },
+    "maria": {
+        "nome": "Maria",
+        "senha": "maria123",
+        "planilha": "Planilha de Ganhos - Maria.xlsx",
+        "pago": false
+    },
+    "fabio": {
+        "nome": "Fabio",
+        "senha": "fabio123",
+        "planilha": "Planilha de Ganhos - Fabio.xlsx",
+        "pago": false
+    },
+    "francisco": {
+        "nome": "Francisco Peixoto Lumi",
+        "senha": "123456",
+        "planilha": "Planilha de Ganhos - Francisco Peixoto Lumi.xlsx",
+        "pago": false
+    }
+}

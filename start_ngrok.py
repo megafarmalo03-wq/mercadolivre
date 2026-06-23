@@ -5,7 +5,9 @@ import sys
 import os
 
 STREAMLIT_PORT = 8501
-NGROK_PATH = r"C:\Users\Diego\Documents\GitHub\ocorrencias\ngrok.exe"
+# ngrok.exe na mesma pasta deste script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+NGROK_PATH = os.path.join(SCRIPT_DIR, "ngrok.exe")
 
 
 def start_streamlit():
