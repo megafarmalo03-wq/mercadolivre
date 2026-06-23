@@ -18,7 +18,47 @@ st.set_page_config(page_title="Planilha de Ganhos", layout="wide")
 # ========== CONFIGURACOES DE PAGAMENTO ==========
 VALOR_PIX = 20.00
 # Chave PIX: CPF 36785517850 — Diego
-PIX_BR_CODE = "00020126360014BR.GOV.BCB.PIX011036785517850520400005303986540520.005802BR5925Diego AC2 Logistica6009SAOPAULO62070503***6304"
+
+# Funcao para gerar BR Code PIX valido
+def gerar_br_code_pix(chave: str, valor: float, nome: str, cidade: str) -> str:
+    """Gera um BR Code PIX valido segundo o Bacen."""
+    gui = "BR.GOV.BCB.PIX"
+    mai = f"0014{gui}01{len(chave):02d}{chave}"
+    
+    payload = f"00020126{len(mai):02d}{mai}"
+    payload += "52040000"  # Merchant Category Code
+    payload += "5303986"   # Transaction Currency (BRL)
+    
+    valor_str = f"{valor:.2f}"
+    payload += f"54{len(valor_str):02d}{valor_str}"
+    
+    payload += "5802BR"    # Country Code
+    payload += f"59{len(nome):02d}{nome}"
+    payload += f"60{len(cidade):02d}{cidade}"
+    
+    txid = "***"
+    adf = f"05{len(txid):02d}{txid}"
+    payload += f"62{len(adf):02d}{adf}"
+    
+    payload += "6304"
+    
+    def crc16_ccitt(data: str) -> str:
+        crc = 0xFFFF
+        for byte in data.encode():
+            crc ^= byte << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ 0x1021
+                else:
+                    crc <<= 1
+            crc &= 0xFFFF
+        return f"{crc:04X}"
+    
+    crc = crc16_ccitt(payload)
+    return payload + crc
+
+# Gera o BR Code PIX valido
+PIX_BR_CODE = gerar_br_code_pix("36785517850", VALOR_PIX, "Diego", "SAOPAULO")
 
 def criar_nova_planilha(caminho):
     """Cria uma planilha zerada com todas as datas dos meses."""
