@@ -133,16 +133,7 @@ def tela_pagamento():
         st.session_state.pop("usuario_pendente", None)
         st.rerun()
 
-    tem_mp = TOKEN_CONFIGURADO
-
-    # Gera PIX dinamico Mercado Pago (uma vez por sessao)
-    if tem_mp and "mp_pix" not in st.session_state:
-        with st.spinner("Gerando QR Code PIX..."):
-            pix = criar_pix(VALOR_PIX, referencia=login_pendente)
-        if "erro" not in pix:
-            st.session_state["mp_pix"] = pix
-
-    # Fallback: QR Code estatico da chave pessoal
+    # Gera QR Code estatico da chave pessoal (CPF)
     if "qr_pix_b64" not in st.session_state:
         buf = io.BytesIO()
         img = qrcode.make(PIX_BR_CODE)
@@ -157,54 +148,32 @@ def tela_pagamento():
         st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Acesso Bloqueado</h2>", unsafe_allow_html=True)
         st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Efetue o pagamento PIX de <b>R&#36; 20,00</b> para liberar seu acesso.</p>", unsafe_allow_html=True)
 
-        if tem_mp and "mp_pix" in st.session_state:
-            pix = st.session_state["mp_pix"]
-            qr_base64 = pix.get("qr_code_base64", "")
-            copia_cola = pix.get("qr_code", "")
-            ticket_url = pix.get("ticket_url", "")
-            payment_id = pix.get("id", "")
+        # QR Code
+        st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:240px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
 
-            # QR Code gerado pelo Mercado Pago
-            if qr_base64:
-                st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_base64}" style="width:240px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
+        # Copia e Cola
+        st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
+        st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{PIX_BR_CODE}</span></div>', unsafe_allow_html=True)
+
+        st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde a liberação.</p>", unsafe_allow_html=True)
+
+        # Verificacao automatica via Mercado Pago (polling)
+        if st.button("&#x1f504; Verificar Pagamento", use_container_width=True):
+            status = ultimo_status(login_pendente)
+            if status == "approved":
+                marcar_usuario_pago(login_pendente)
+                st.balloons()
+                st.success("Pagamento confirmado! Liberando acesso...")
+                st.session_state["logado"] = True
+                st.session_state["usuario"] = usuarios[login_pendente]
+                st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
+                st.session_state.pop("usuario_pendente", None)
+                st.session_state.pop("qr_pix_b64", None)
+                st.rerun()
+            elif status in ("pending", "in_process"):
+                st.info("Pagamento em processamento. Aguarde e tente novamente.")
             else:
-                st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:240px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
-
-            # Copia e Cola
-            if copia_cola:
-                st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
-                st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{copia_cola}</span></div>', unsafe_allow_html=True)
-
-            # Link para pagar no celular
-            if ticket_url:
-                st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><a href="{ticket_url}" target="_blank" style="display:inline-block;background:#00b1ea;color:#fff;padding:12px 24px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 8px 24px rgba(0,177,234,0.35);">Pagar no Celular</a></div>', unsafe_allow_html=True)
-
-            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:11px;margin-bottom:16px;'>Após pagar, clique em <b>Verificar Pagamento</b> abaixo.</p>", unsafe_allow_html=True)
-
-            # Verificacao automatica
-            if st.button("&#x1f504; Verificar Pagamento", use_container_width=True):
-                status = consultar_pagamento(payment_id) if payment_id else ultimo_status(login_pendente)
-                if status == "approved":
-                    marcar_usuario_pago(login_pendente)
-                    st.balloons()
-                    st.success("Pagamento confirmado! Liberando acesso...")
-                    st.session_state["logado"] = True
-                    st.session_state["usuario"] = usuarios[login_pendente]
-                    st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
-                    st.session_state.pop("usuario_pendente", None)
-                    st.session_state.pop("mp_pix", None)
-                    st.session_state.pop("qr_pix_b64", None)
-                    st.rerun()
-                elif status in ("pending", "in_process"):
-                    st.info("Pagamento em processamento. Aguarde e tente novamente.")
-                else:
-                    st.warning("Pagamento nao encontrado. Verifique se ja pagou.")
-        else:
-            # Fallback QR Code estatico
-            st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:220px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
-            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
-            st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{PIX_BR_CODE}</span></div>', unsafe_allow_html=True)
-            st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde a liberação.</p>", unsafe_allow_html=True)
+                st.warning("Pagamento nao encontrado. Verifique se ja pagou.")
 
         # Codigo admin fallback
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
@@ -216,7 +185,6 @@ def tela_pagamento():
             st.session_state["usuario"] = usuarios[login_pendente]
             st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
             st.session_state.pop("usuario_pendente", None)
-            st.session_state.pop("mp_pix", None)
             st.session_state.pop("qr_pix_b64", None)
             st.rerun()
         elif codigo.strip():
@@ -225,7 +193,6 @@ def tela_pagamento():
         if st.button("Voltar ao Login", use_container_width=True):
             st.session_state["tela"] = "login"
             st.session_state.pop("usuario_pendente", None)
-            st.session_state.pop("mp_pix", None)
             st.session_state.pop("qr_pix_b64", None)
             st.rerun()
 
