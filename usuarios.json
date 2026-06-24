@@ -28,5 +28,11 @@
         "senha": "123456",
         "planilha": "Planilha de Ganhos - Francisco Peixoto Lumi.xlsx",
         "pago": false
+    },
+    "Leonardo": {
+        "nome": "Leonardo",
+        "senha": "123456",
+        "planilha": "Planilha de Ganhos - Leonardo.xlsx",
+        "pago": false
     }
 }
