@@ -13,7 +13,7 @@ import openpyxl
 from streamlit.components.v1 import html as st_html
 from mercado_pago import criar_pix, consultar_pagamento, ultimo_status, TOKEN_CONFIGURADO
 
-st.set_page_config(page_title="Planilha de Ganhos", layout="wide")
+st.set_page_config(page_title="Gestão de Entregas 2.0", layout="wide")
 
 # ========== CONFIGURACOES DE PAGAMENTO ==========
 VALOR_PIX = 20.00
@@ -88,7 +88,7 @@ def garantir_planilha_usuario(caminho):
 
 # ========== CONFIGURACOES DE PAGAMENTO ==========
 VALOR_PIX = 20.00
-PIX_CHAVE = "00020126580014BR.GOV.BCB.PIX0136diego@seudominio.com5204000053039865404{valor}5802BR5925Diego AC2 Logistica6009SAOPAULO62070503***6304"  # Pix Copia-e-Cola de exemplo — SUBSTITUA PELO SEU
+PIX_CHAVE = "00020126580014BR.GOV.BCB.PIX0136diego@seudominio.com5204000053039865404{valor}5802BR5925Diego Gestao Entregas 2.06009SAOPAULO62070503***6304"  # Pix Copia-e-Cola de exemplo — SUBSTITUA PELO SEU
 
 def gerar_qrcode_pix(valor: float, chave: str = PIX_CHAVE, descricao: str = "Acesso Planilha de Ganhos"):
     """Gera QR Code do PIX e retorna base64 da imagem."""
@@ -354,7 +354,7 @@ def tela_login():
                         st.rerun()
                     else:
                         st.error("Usuário ou senha incorretos.")
-                st.markdown("<div style='color:#9ca3af;font-size:10px;text-align:center;margin-top:12px;'>AC2 Logistica &bull; 2026</div>", unsafe_allow_html=True)
+                st.markdown("<div style='color:#9ca3af;font-size:10px;text-align:center;margin-top:12px;'>Gestão de Entregas 2.0 &bull; 2026</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div style='color:#fff;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px;text-align:center;'>Criar Conta</div>", unsafe_allow_html=True)
                 novo_user = st.text_input("Usuário", placeholder="usuario", key="cad_user", label_visibility="collapsed")
@@ -624,7 +624,7 @@ inicializar_dados()
 # Header com logout
 h1, h2 = st.columns([6, 1])
 with h1:
-    st.title("Planilha de Ganhos - AC2")
+    st.title("Gestão de Entregas 2.0")
 with h2:
     usuario_nome = st.session_state["usuario"].get("nome", "Usuário")
     st.markdown(f"<div style='text-align:right; padding-top:18px;'><b>{usuario_nome}</b></div>", unsafe_allow_html=True)
