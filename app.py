@@ -11,7 +11,9 @@ from datetime import datetime
 import calendar
 import openpyxl
 from streamlit.components.v1 import html as st_html
-from mercado_pago import criar_pix, consultar_pagamento, ultimo_status, TOKEN_CONFIGURADO
+from mercado_pago import criar_pix, consultar_pagamento, ultimo_status, TOKEN_CONFIGURADO, buscar_por_referencia
+import threading
+import time
 
 st.set_page_config(page_title="Gestão de Entregas 2.0", layout="wide")
 
@@ -318,6 +320,7 @@ def tela_admin():
 def tela_pagamento():
     user = st.session_state.get("usuario_pendente", {})
     login_pendente = user.get("login", "")
+    nome_pendente = user.get("nome", "")
 
     # Se ja foi pago (outra aba/admin)
     usuarios = carregar_usuarios()
@@ -328,63 +331,150 @@ def tela_pagamento():
         st.session_state.pop("usuario_pendente", None)
         st.rerun()
 
-    # Gera QR Code estatico da chave pessoal (CPF)
-    if "qr_pix_b64" not in st.session_state:
-        buf = io.BytesIO()
-        img = qrcode.make(PIX_BR_CODE)
-        img.save(buf, format="PNG")
-        st.session_state["qr_pix_b64"] = base64.b64encode(buf.getvalue()).decode("utf-8")
-    qr_b64 = st.session_state["qr_pix_b64"]
+    # Inicializa estado do pagamento na sessao
+    if "mp_pago" not in st.session_state:
+        st.session_state["mp_pago"] = False
+    if "mp_codigo_liberacao" not in st.session_state:
+        st.session_state["mp_codigo_liberacao"] = None
 
-    # Gera codigo de liberacao se ainda nao existir
-    codigo_atual = usuarios.get(login_pendente, {}).get("codigo_liberacao", "")
-    if not codigo_atual:
-        codigo_atual = gerar_codigo_liberacao()
-        salvar_codigo_pendente(login_pendente, codigo_atual)
+    # Tenta criar pagamento dinamico via Mercado Pago (se conta for PJ/habilitada)
+    if "mp_payment_id" not in st.session_state:
+        st.session_state["mp_payment_id"] = None
+    if "mp_qr_b64" not in st.session_state:
+        st.session_state["mp_qr_b64"] = None
+    if "mp_br_code" not in st.session_state:
+        st.session_state["mp_br_code"] = None
+
+    if st.session_state["mp_payment_id"] is None and TOKEN_CONFIGURADO:
+        referencia = f"gestaoentregas_{login_pendente}_{int(time.time())}"
+        resultado = criar_pix(VALOR_PIX, descricao=f"Acesso Gestão de Entregas 2.0 - {nome_pendente or login_pendente}", referencia=referencia)
+        if "erro" not in resultado and resultado.get("id"):
+            st.session_state["mp_payment_id"] = resultado["id"]
+            st.session_state["mp_qr_b64"] = resultado.get("qr_code_base64", "")
+            st.session_state["mp_br_code"] = resultado.get("qr_code", "")
+            st.session_state["mp_external_reference"] = referencia
+        elif resultado.get("fallback"):
+            # Conta pessoal — nao gera dinamico, usa estatico
+            st.session_state["mp_payment_id"] = "ESTATICO"
+        else:
+            st.session_state["mp_payment_id"] = "ESTATICO"
+
+    # Verifica status automaticamente se for pagamento dinamico
+    if st.session_state["mp_payment_id"] and st.session_state["mp_payment_id"] != "ESTATICO" and not st.session_state["mp_pago"]:
+        status = consultar_pagamento(str(st.session_state["mp_payment_id"]))
+        if status == "approved":
+            st.session_state["mp_pago"] = True
+            codigo_auto = gerar_codigo_liberacao()
+            st.session_state["mp_codigo_liberacao"] = codigo_auto
+            if login_pendente in usuarios:
+                usuarios[login_pendente]["codigo_liberacao"] = codigo_auto
+                with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+                    json.dump(usuarios, f, indent=4, ensure_ascii=False)
+            st.rerun()
 
     _, c2, _ = st.columns([1, 2.6, 1])
     with c2:
         st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
-        st.markdown("<div style='text-align:center;'><span style='font-size:48px;'>&#x1f512;</span></div>", unsafe_allow_html=True)
-        st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Acesso Bloqueado</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Efetue o pagamento PIX de <b>R&#36; 20,00</b> para liberar seu acesso.</p>", unsafe_allow_html=True)
 
-        # QR Code
-        st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:240px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
+        if st.session_state["mp_pago"]:
+            # Pagamento confirmado - mostra codigo de liberacao
+            st.markdown("<div style='text-align:center;'><span style='font-size:48px;'>&#x2705;</span></div>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Pagamento Confirmado!</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Seu pagamento foi confirmado. Use o código abaixo para liberar seu acesso.</p>", unsafe_allow_html=True)
 
-        # Copia e Cola
-        st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
-        st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{PIX_BR_CODE}</span></div>', unsafe_allow_html=True)
+            codigo_auto = st.session_state.get("mp_codigo_liberacao", "")
+            st.markdown(f"""
+            <div style="background:rgba(0,255,0,0.1);border:2px solid #22c55e;border-radius:16px;padding:24px;text-align:center;margin-bottom:20px;">
+                <div style="color:#9ca3af;font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:2px;">Código de Liberação</div>
+                <div style="color:#fff;font-size:32px;font-weight:800;letter-spacing:4px;font-family:monospace;">{codigo_auto}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde seu código de liberação.</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:16px;'>Digite o código acima no campo abaixo para ativar sua conta:</p>", unsafe_allow_html=True)
+            codigo_input = st.text_input("Codigo de Liberacao", placeholder="Ex: AB12CD34", key="codigo_lib_auto", label_visibility="collapsed")
 
-        # Campo para inserir o codigo de liberacao
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.markdown("<p style='color:#9ca3af;text-align:center;font-size:11px;margin-bottom:6px;'>Digite o código de liberação recebido:</p>", unsafe_allow_html=True)
-        codigo_input = st.text_input("Codigo de Liberacao", placeholder="Ex: AB12CD34", key="codigo_lib", label_visibility="collapsed")
+            if st.button("Liberar Acesso", type="primary", use_container_width=True):
+                if validar_codigo_liberacao(login_pendente, codigo_input):
+                    if login_pendente not in usuarios:
+                        planilha_nome = f"Planilha de Ganhos - {nome_pendente.title()}.xlsx" if nome_pendente else f"Planilha de Ganhos - {login_pendente}.xlsx"
+                        usuarios[login_pendente] = {
+                            "nome": nome_pendente or login_pendente,
+                            "senha": "123456",
+                            "planilha": planilha_nome,
+                            "pago": True,
+                        }
+                        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+                            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                        garantir_planilha_usuario(planilha_nome)
+                    else:
+                        marcar_usuario_pago(login_pendente)
+                    st.balloons()
+                    st.success("Código confirmado! Conta criada e acesso liberado...")
+                    st.session_state["logado"] = True
+                    st.session_state["usuario"] = usuarios[login_pendente]
+                    st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
+                    st.session_state.pop("usuario_pendente", None)
+                    st.session_state.pop("mp_payment_id", None)
+                    st.session_state.pop("mp_qr_b64", None)
+                    st.session_state.pop("mp_br_code", None)
+                    st.session_state.pop("mp_pago", None)
+                    st.session_state.pop("mp_codigo_liberacao", None)
+                    st.session_state.pop("qr_pix_b64", None)
+                    st.rerun()
+                else:
+                    st.error("Código inválido. Verifique se digitou corretamente.")
+        else:
+            # Tela de pagamento pendente
+            st.markdown("<div style='text-align:center;'><span style='font-size:48px;'>&#x1f512;</span></div>", unsafe_allow_html=True)
+            st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Acesso Bloqueado</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Efetue o pagamento PIX de <b>R&#36; 20,00</b> para criar sua conta e liberar o acesso.</p>", unsafe_allow_html=True)
 
-        if st.button("Liberar Acesso", type="primary", use_container_width=True):
-            if validar_codigo_liberacao(login_pendente, codigo_input):
-                marcar_usuario_pago(login_pendente)
-                st.balloons()
-                st.success("Código confirmado! Acesso liberado...")
-                st.session_state["logado"] = True
-                st.session_state["usuario"] = usuarios[login_pendente]
-                st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
-                st.session_state.pop("usuario_pendente", None)
-                st.session_state.pop("qr_pix_b64", None)
-                st.rerun()
+            # QR Code: tenta usar do Mercado Pago, senao usa estatico
+            qr_b64 = st.session_state.get("mp_qr_b64", "")
+            if not qr_b64:
+                if "qr_pix_b64" not in st.session_state:
+                    buf = io.BytesIO()
+                    img = qrcode.make(PIX_BR_CODE)
+                    img.save(buf, format="PNG")
+                    st.session_state["qr_pix_b64"] = base64.b64encode(buf.getvalue()).decode("utf-8")
+                qr_b64 = st.session_state["qr_pix_b64"]
+            st.markdown(f'<div style="text-align:center;margin-bottom:16px;"><img src="data:image/png;base64,{qr_b64}" style="width:240px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>', unsafe_allow_html=True)
+
+            # Copia e Cola
+            br_code = st.session_state.get("mp_br_code", "") or PIX_BR_CODE
+            st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
+            st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{br_code}</span></div>', unsafe_allow_html=True)
+
+            st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, o sistema confirmará automaticamente e liberará seu código de acesso.</p>", unsafe_allow_html=True)
+
+            # Auto-refresh para verificar pagamento dinamico
+            if st.session_state.get("mp_payment_id") and st.session_state["mp_payment_id"] != "ESTATICO":
+                st.markdown("<meta http-equiv='refresh' content='10'>", unsafe_allow_html=True)
+                st.info("Aguardando confirmação do pagamento... A página verifica automaticamente a cada 10 segundos.")
             else:
-                st.error("Código inválido. Verifique se digitou corretamente.")
+                st.warning("Modo de pagamento via chave PIX direta. O pagamento cai direto na conta. O sistema verificará automaticamente quando possível.")
 
-        # Mostrar codigo para o admin (apenas para teste/desenvolvimento)
-        with st.expander("Ver código de liberação (admin)"):
-            st.code(codigo_atual, language="text")
-            st.caption("Este código é gerado automaticamente. Envie para o usuário após confirmar o pagamento.")
+            # Botao de simular pagamento (para testes ou liberacao manual pelo admin)
+            with st.expander("Simular / Confirmar Pagamento Manual"):
+                st.caption("Use apenas se você já recebeu o PIX de R$ 20,00 na sua conta.")
+                if st.button("Confirmar Pagamento Recebido", type="primary", use_container_width=True):
+                    st.session_state["mp_pago"] = True
+                    codigo_auto = gerar_codigo_liberacao()
+                    st.session_state["mp_codigo_liberacao"] = codigo_auto
+                    if login_pendente in usuarios:
+                        usuarios[login_pendente]["codigo_liberacao"] = codigo_auto
+                        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+                            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                    st.rerun()
 
         if st.button("Voltar ao Login", use_container_width=True):
             st.session_state["tela"] = "login"
             st.session_state.pop("usuario_pendente", None)
+            st.session_state.pop("mp_payment_id", None)
+            st.session_state.pop("mp_qr_b64", None)
+            st.session_state.pop("mp_br_code", None)
+            st.session_state.pop("mp_pago", None)
+            st.session_state.pop("mp_codigo_liberacao", None)
             st.session_state.pop("qr_pix_b64", None)
             st.rerun()
 

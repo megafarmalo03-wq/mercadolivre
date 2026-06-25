@@ -11,13 +11,18 @@ ACCESS_TOKEN = "APP_USR-1241304769992786-062223-e46e28076bcb308db533c794ab9ae1ed
 TOKEN_CONFIGURADO = True
 BASE_URL = "https://api.mercadopago.com"
 
+# Para conta pessoal sem CNPJ, o Mercado Pago bloqueia pagamentos em producao.
+# O modo sandbox permite testes. Em producao real, usamos QR Code estatico (fallback).
+MODO_SANDBOX = True  # True = gera pagamentos de teste; False = tenta producao
+
 
 def _headers():
-    return {
+    h = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
         "Content-Type": "application/json",
         "X-Idempotency-Key": str(uuid.uuid4()),
     }
+    return h
 
 
 def criar_pix(valor: float, descricao: str = "Acesso Planilha de Ganhos", referencia: str = ""):
@@ -56,7 +61,11 @@ def criar_pix(valor: float, descricao: str = "Acesso Planilha de Ganhos", refere
             "external_reference": referencia,
         }
     except requests.exceptions.HTTPError as e:
-        return {"erro": f"API Error {resp.status_code}: {resp.text[:200]}", "status_code": resp.status_code}
+        erro_texto = resp.text[:300] if 'resp' in dir() else str(e)
+        # Se for erro de credenciais live em conta pessoal, retorna erro especifico
+        if "Unauthorized use of live credentials" in erro_texto:
+            return {"erro": "Conta pessoal: use QR Code estatico ou ative modo sandbox", "status_code": 401, "fallback": True}
+        return {"erro": f"API Error {resp.status_code}: {erro_texto}", "status_code": resp.status_code}
     except Exception as e:
         return {"erro": str(e)}
 
