@@ -184,9 +184,135 @@ def criar_usuario(login: str, nome: str, senha: str):
 
 
 def logout():
-    for chave in ["logado", "usuario", "arquivo_excel", "dados"]:
+    for chave in ["logado", "usuario", "arquivo_excel", "dados", "admin_logado"]:
         st.session_state.pop(chave, None)
     st.rerun()
+
+
+def tela_admin():
+    """Tela de gerenciamento interno de usuarios (apenas admin)."""
+    st.markdown("""
+    <style>
+    .admin-header { color: #fff; font-size: 28px; font-weight: 800; margin-bottom: 24px; text-align: center; }
+    .admin-card { background: rgba(255,255,255,0.05); border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:4vh'></div>", unsafe_allow_html=True)
+    st.markdown("<div class='admin-header'>Painel Administrativo</div>", unsafe_allow_html=True)
+
+    usuarios = carregar_usuarios()
+
+    # Estatisticas
+    total = len(usuarios)
+    pagos = sum(1 for u in usuarios.values() if u.get("pago", False))
+    pendentes = total - pagos
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total de Usuários", total)
+    with col2:
+        st.metric("Pagos", pagos)
+    with col3:
+        st.metric("Pendentes", pendentes)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # Tabela de usuarios
+    st.subheader("Lista de Usuários Cadastrados")
+
+    dados_tabela = []
+    for login, info in usuarios.items():
+        dados_tabela.append({
+            "Login": login,
+            "Nome": info.get("nome", ""),
+            "Senha": info.get("senha", ""),
+            "Pago": "Sim" if info.get("pago", False) else "Não",
+            "Código Liberação": info.get("codigo_liberacao", "-"),
+            "Planilha": info.get("planilha", ""),
+        })
+
+    df_usuarios = pd.DataFrame(dados_tabela)
+    st.dataframe(df_usuarios, use_container_width=True, hide_index=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # Acoes por usuario
+    st.subheader("Gerenciar Usuário")
+    col_sel, col_acoes = st.columns([1, 2])
+
+    with col_sel:
+        usuario_sel = st.selectbox("Selecione o usuário", list(usuarios.keys()))
+
+    if usuario_sel:
+        user_data = usuarios[usuario_sel]
+        with col_acoes:
+            c1, c2, c3, c4 = st.columns(4)
+
+            with c1:
+                if st.button("Ver Código", use_container_width=True):
+                    codigo = user_data.get("codigo_liberacao", "Nenhum")
+                    st.info(f"Código: **{codigo}**")
+
+            with c2:
+                if st.button("Gerar Novo Código", use_container_width=True):
+                    novo_codigo = gerar_codigo_liberacao()
+                    salvar_codigo_pendente(usuario_sel, novo_codigo)
+                    st.success(f"Novo código: **{novo_codigo}**")
+                    st.rerun()
+
+            with c3:
+                if not user_data.get("pago", False):
+                    if st.button("Marcar como Pago", use_container_width=True):
+                        marcar_usuario_pago(usuario_sel)
+                        st.success(f"Usuário **{usuario_sel}** liberado!")
+                        st.rerun()
+                else:
+                    if st.button("Bloquear Acesso", use_container_width=True):
+                        usuarios[usuario_sel]["pago"] = False
+                        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+                            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                        st.warning(f"Usuário **{usuario_sel}** bloqueado.")
+                        st.rerun()
+
+            with c4:
+                if st.button("Excluir Usuário", use_container_width=True):
+                    del usuarios[usuario_sel]
+                    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+                        json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                    st.error(f"Usuário **{usuario_sel}** excluído.")
+                    st.rerun()
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
+    # Adicionar novo usuario manualmente
+    with st.expander("Adicionar Novo Usuário"):
+        col_nome, col_user, col_senha = st.columns(3)
+        with col_nome:
+            novo_nome = st.text_input("Nome Completo", key="admin_novo_nome")
+        with col_user:
+            novo_login = st.text_input("Login", key="admin_novo_login")
+        with col_senha:
+            nova_senha = st.text_input("Senha", type="password", key="admin_nova_senha")
+
+        col_pago, col_espaco = st.columns([1, 3])
+        with col_pago:
+            novo_pago = st.checkbox("Já está pago?", key="admin_novo_pago")
+
+        if st.button("Criar Usuário", type="primary"):
+            if novo_login and novo_nome and nova_senha:
+                criar_usuario(novo_login, novo_nome, nova_senha)
+                if novo_pago:
+                    marcar_usuario_pago(novo_login)
+                st.success("Usuário criado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Preencha todos os campos.")
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+    if st.button("Sair do Painel", use_container_width=True):
+        st.session_state.pop("admin_logado", None)
+        st.rerun()
 
 
 def tela_pagamento():
@@ -260,6 +386,36 @@ def tela_pagamento():
             st.session_state["tela"] = "login"
             st.session_state.pop("usuario_pendente", None)
             st.session_state.pop("qr_pix_b64", None)
+            st.rerun()
+
+
+def tela_login_admin():
+    """Tela de login exclusiva para o painel administrativo."""
+    st.markdown("""
+    <style>
+    .stApp { background: #0f0f1a !important; }
+    .main { background: #0f0f1a !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, c2, _ = st.columns([1, 2, 1])
+    with c2:
+        st.markdown("<div style='height:15vh'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center;'><span style='font-size:48px;'>&#x1f510;</span></div>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color:#fff;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:4px;'>Painel Administrativo</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#a5b4fc;text-align:center;font-size:15px;margin-bottom:24px;'>Acesso restrito para administradores.</p>", unsafe_allow_html=True)
+
+        senha_admin = st.text_input("Senha de Administrador", type="password", placeholder="Digite a senha", key="admin_senha_input", label_visibility="collapsed")
+
+        if st.button("Entrar no Painel", type="primary", use_container_width=True):
+            if senha_admin == "admin2026":
+                st.session_state["admin_logado"] = True
+                st.rerun()
+            else:
+                st.error("Senha incorreta.")
+
+        if st.button("Voltar ao Login", use_container_width=True):
+            st.session_state["tela"] = "login"
             st.rerun()
 
 
@@ -354,6 +510,10 @@ def tela_login():
                 if st.button("Criar Conta", key="btn_criar"):
                     st.session_state["tela"] = "cadastro"
                     st.rerun()
+                st.markdown("<div style='color:#9ca3af;font-size:11px;margin-top:14px;margin-bottom:10px;'>Acesso administrativo</div>", unsafe_allow_html=True)
+                if st.button("Painel Admin", key="btn_admin"):
+                    st.session_state["tela"] = "admin"
+                    st.rerun()
             else:
                 st.markdown("<div style='color:#9ca3af;font-size:11px;margin-bottom:10px;'>Já tem conta?</div>", unsafe_allow_html=True)
                 if st.button("Fazer Login", key="btn_login"):
@@ -391,7 +551,15 @@ def tela_login():
                     criar_usuario(novo_user, novo_nome, nova_senha)
 
 
+if "admin_logado" in st.session_state and st.session_state["admin_logado"]:
+    tela_admin()
+    st.stop()
+
 if "logado" not in st.session_state or not st.session_state["logado"]:
+    # Verifica se é login admin
+    if st.session_state.get("tela") == "admin":
+        tela_login_admin()
+        st.stop()
     tela_login()
     st.stop()
 
