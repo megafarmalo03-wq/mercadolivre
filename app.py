@@ -100,11 +100,40 @@ def gerar_qrcode_pix(valor: float, chave: str = PIX_CHAVE, descricao: str = "Ace
     return f"data:image/png;base64,{b64}"
 
 
+import random
+import string
+
+
+def gerar_codigo_liberacao(tamanho=8):
+    """Gera um codigo aleatorio de letras e numeros."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=tamanho))
+
+
+def salvar_codigo_pendente(login: str, codigo: str):
+    """Salva o codigo de liberacao no arquivo de usuarios."""
+    usuarios = carregar_usuarios()
+    login = login.strip().lower()
+    if login in usuarios:
+        usuarios[login]["codigo_liberacao"] = codigo
+        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+
+
+def validar_codigo_liberacao(login: str, codigo: str):
+    """Verifica se o codigo informado esta correto."""
+    usuarios = carregar_usuarios()
+    login = login.strip().lower()
+    if login in usuarios:
+        return usuarios[login].get("codigo_liberacao", "") == codigo.strip().upper()
+    return False
+
+
 def marcar_usuario_pago(login: str):
     usuarios = carregar_usuarios()
     login = login.strip().lower()
     if login in usuarios:
         usuarios[login]["pago"] = True
+        usuarios[login].pop("codigo_liberacao", None)
         with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
             json.dump(usuarios, f, indent=4, ensure_ascii=False)
 
@@ -181,6 +210,12 @@ def tela_pagamento():
         st.session_state["qr_pix_b64"] = base64.b64encode(buf.getvalue()).decode("utf-8")
     qr_b64 = st.session_state["qr_pix_b64"]
 
+    # Gera codigo de liberacao se ainda nao existir
+    codigo_atual = usuarios.get(login_pendente, {}).get("codigo_liberacao", "")
+    if not codigo_atual:
+        codigo_atual = gerar_codigo_liberacao()
+        salvar_codigo_pendente(login_pendente, codigo_atual)
+
     _, c2, _ = st.columns([1, 2.6, 1])
     with c2:
         st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
@@ -195,40 +230,31 @@ def tela_pagamento():
         st.markdown("<p style='color:#9ca3af;text-align:center;font-size:12px;margin-bottom:8px;'>Cole no app do seu banco</p>", unsafe_allow_html=True)
         st.markdown(f'<div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:12px;border:1px dashed rgba(255,255,255,0.15);text-align:center;margin-bottom:14px;overflow-wrap:break-word;"><span style="color:#111;background:#fff;padding:6px 10px;border-radius:4px;font-size:13px;font-weight:700;">{PIX_BR_CODE}</span></div>', unsafe_allow_html=True)
 
-        st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde a liberação.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#fbbf24;text-align:center;font-size:12px;margin:10px 0;'>Após o pagamento, envie o comprovante pelo WhatsApp e aguarde seu código de liberação.</p>", unsafe_allow_html=True)
 
-        # Verificacao automatica via Mercado Pago (polling)
-        if st.button("&#x1f504; Verificar Pagamento", use_container_width=True):
-            status = ultimo_status(login_pendente)
-            if status == "approved":
+        # Campo para inserir o codigo de liberacao
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#9ca3af;text-align:center;font-size:11px;margin-bottom:6px;'>Digite o código de liberação recebido:</p>", unsafe_allow_html=True)
+        codigo_input = st.text_input("Codigo de Liberacao", placeholder="Ex: AB12CD34", key="codigo_lib", label_visibility="collapsed")
+
+        if st.button("Liberar Acesso", type="primary", use_container_width=True):
+            if validar_codigo_liberacao(login_pendente, codigo_input):
                 marcar_usuario_pago(login_pendente)
                 st.balloons()
-                st.success("Pagamento confirmado! Liberando acesso...")
+                st.success("Código confirmado! Acesso liberado...")
                 st.session_state["logado"] = True
                 st.session_state["usuario"] = usuarios[login_pendente]
                 st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
                 st.session_state.pop("usuario_pendente", None)
                 st.session_state.pop("qr_pix_b64", None)
                 st.rerun()
-            elif status in ("pending", "in_process"):
-                st.info("Pagamento em processamento. Aguarde e tente novamente.")
             else:
-                st.warning("Pagamento nao encontrado. Verifique se ja pagou.")
+                st.error("Código inválido. Verifique se digitou corretamente.")
 
-        # Codigo admin fallback
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        codigo = st.text_input("Codigo de Liberacao", placeholder="Codigo do administrador", key="codigo_lib", label_visibility="collapsed")
-        if codigo.strip().lower() == "liberar2026":
-            marcar_usuario_pago(login_pendente)
-            st.success("Acesso liberado! Entrando...")
-            st.session_state["logado"] = True
-            st.session_state["usuario"] = usuarios[login_pendente]
-            st.session_state["arquivo_excel"] = usuarios[login_pendente]["planilha"]
-            st.session_state.pop("usuario_pendente", None)
-            st.session_state.pop("qr_pix_b64", None)
-            st.rerun()
-        elif codigo.strip():
-            st.error("Codigo invalido.")
+        # Mostrar codigo para o admin (apenas para teste/desenvolvimento)
+        with st.expander("Ver código de liberação (admin)"):
+            st.code(codigo_atual, language="text")
+            st.caption("Este código é gerado automaticamente. Envie para o usuário após confirmar o pagamento.")
 
         if st.button("Voltar ao Login", use_container_width=True):
             st.session_state["tela"] = "login"
