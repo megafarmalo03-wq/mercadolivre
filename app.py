@@ -827,10 +827,23 @@ def calcular_df(df):
 
 
 def resumo(df_calc):
-    n = len(df_calc)
-    meio = min(15, n)
-    df1 = df_calc.iloc[:meio]
-    df2 = df_calc.iloc[meio:]
+    # 1a quinzena: dia 26 ao 10
+    # 2a quinzena: dia 11 ao 25
+    df_calc = df_calc.copy()
+    df_calc["dia"] = df_calc["data"].apply(lambda d: d.day if pd.notna(d) else None)
+
+    def _is_q1(dia):
+        if dia is None:
+            return False
+        return dia >= 26 or dia <= 10
+
+    def _is_q2(dia):
+        if dia is None:
+            return False
+        return 11 <= dia <= 25
+
+    df1 = df_calc[df_calc["dia"].apply(_is_q1)]
+    df2 = df_calc[df_calc["dia"].apply(_is_q2)]
 
     pac1 = df1["pacotes"].sum()
     ent1 = df1["entregas"].sum()
