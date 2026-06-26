@@ -157,12 +157,13 @@ def carregar_usuarios():
         return padrao
 
 
-def criar_usuario(login: str, nome: str, senha: str):
+def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
     login = login.strip().lower()
     nome = nome.strip()
     senha = senha.strip()
+    telefone = telefone.strip()
     if not login or not nome or not senha:
-        st.error("Preencha todos os campos.")
+        st.error("Preencha todos os campos obrigatórios.")
         return
     if len(senha) < 4:
         st.error("Senha muito curta.")
@@ -175,6 +176,7 @@ def criar_usuario(login: str, nome: str, senha: str):
     usuarios[login] = {
         "nome": nome,
         "senha": senha,
+        "telefone": telefone,
         "planilha": planilha_nome,
         "pago": False
     }
@@ -530,12 +532,13 @@ def tela_login():
                 st.markdown("<div style='color:#9ca3af;font-size:10px;text-align:center;margin-top:12px;'>Gestão de Entregas 2.0 &bull; 2026</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div style='color:#fff;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:24px;text-align:center;'>Criar Conta</div>", unsafe_allow_html=True)
-                novo_user = st.text_input("Usuário", placeholder="usuario", key="cad_user", label_visibility="collapsed")
                 novo_nome = st.text_input("Nome Completo", placeholder="nome completo", key="cad_nome", label_visibility="collapsed")
+                novo_telefone = st.text_input("Telefone", placeholder="55xx xxxxx-xxxx", key="cad_telefone", label_visibility="collapsed")
+                novo_user = st.text_input("Usuário", placeholder="usuario", key="cad_user", label_visibility="collapsed")
                 nova_senha = st.text_input("Senha", type="password", placeholder="senha", key="cad_senha", label_visibility="collapsed")
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 if st.button("Cadastrar", type="primary", use_container_width=True, key="btn_cadastrar"):
-                    criar_usuario(novo_user, novo_nome, nova_senha)
+                    criar_usuario(novo_user, novo_nome, nova_senha, novo_telefone)
 
 
 if "admin_logado" in st.session_state and st.session_state["admin_logado"]:
