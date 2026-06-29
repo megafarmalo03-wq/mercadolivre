@@ -117,8 +117,7 @@ def salvar_codigo_pendente(login: str, codigo: str):
     login = login.strip().lower()
     if login in usuarios:
         usuarios[login]["codigo_liberacao"] = codigo
-        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+        salvar_usuarios(usuarios)
 
 
 def validar_codigo_liberacao(login: str, codigo: str):
@@ -136,12 +135,26 @@ def marcar_usuario_pago(login: str):
     if login in usuarios:
         usuarios[login]["pago"] = True
         usuarios[login].pop("codigo_liberacao", None)
-        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+        salvar_usuarios(usuarios)
 
 
 # ========== LOGIN SISTEMA ==========
 USUARIOS_JSON = "usuarios.json"
+
+def _backup_usuarios():
+    """Cria backup do arquivo de usuarios antes de qualquer alteracao."""
+    if os.path.exists(USUARIOS_JSON):
+        try:
+            backup_path = USUARIOS_JSON + ".backup"
+            shutil.copy2(USUARIOS_JSON, backup_path)
+        except Exception:
+            pass
+
+def salvar_usuarios(usuarios: dict):
+    """Salva usuarios no JSON sempre fazendo backup primeiro."""
+    _backup_usuarios()
+    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+        json.dump(usuarios, f, indent=4, ensure_ascii=False)
 
 def carregar_usuarios():
     """Carrega usuarios do JSON. Nunca sobrescreve o arquivo existente."""
@@ -150,19 +163,21 @@ def carregar_usuarios():
             with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            # Se o arquivo existir mas estiver corrompido, faz backup e retorna vazio
-            try:
-                shutil.copy2(USUARIOS_JSON, USUARIOS_JSON + ".backup")
-            except Exception:
-                pass
+            # Se o arquivo existir mas estiver corrompido, tenta recuperar do backup
+            backup_path = USUARIOS_JSON + ".backup"
+            if os.path.exists(backup_path):
+                try:
+                    with open(backup_path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    pass
             return {}
     # Se o arquivo nao existe, cria apenas com o admin padrao
     padrao = {
         "diego": {"nome": "Diego", "senha": "diego123",
                    "planilha": "Planilha de Ganhos - Diego.xlsx", "pago": True}
     }
-    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-        json.dump(padrao, f, indent=4, ensure_ascii=False)
+    salvar_usuarios(padrao)
     return padrao
 
 
@@ -189,8 +204,7 @@ def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
         "planilha": planilha_nome,
         "pago": False
     }
-    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-        json.dump(usuarios, f, indent=4, ensure_ascii=False)
+    salvar_usuarios(usuarios)
     garantir_planilha_usuario(planilha_nome)
     st.success("Conta criada! Efetue o pagamento para liberar o acesso.")
     # Redireciona para tela de pagamento
@@ -293,16 +307,14 @@ def tela_admin():
                 else:
                     if st.button("Bloquear Acesso", use_container_width=True):
                         usuarios[usuario_sel]["pago"] = False
-                        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-                            json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                        salvar_usuarios(usuarios)
                         st.warning(f"Usuário **{usuario_sel}** bloqueado.")
                         st.rerun()
 
             with c2:
                 if st.button("Excluir Usuário", use_container_width=True):
                     del usuarios[usuario_sel]
-                    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-                        json.dump(usuarios, f, indent=4, ensure_ascii=False)
+                    salvar_usuarios(usuarios)
                     st.error(f"Usuário **{usuario_sel}** excluído.")
                     st.rerun()
 
