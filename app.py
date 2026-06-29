@@ -1120,7 +1120,7 @@ with tab_lanc:
         with c2:
             gasolina = st.number_input("Gasolina", min_value=0.0, value=float(linha["gasolina"]) if pd.notna(linha["gasolina"]) else 0.0, step=0.01)
             almoco = st.number_input("Almoço", min_value=0.0, value=float(linha["almoco"]) if pd.notna(linha["almoco"]) else 0.0, step=0.01)
-            besteira = st.number_input("Besteira", min_value=0.0, value=float(linha["besteira"]) if pd.notna(linha["besteira"]) else 0.0, step=0.01)
+            besteira = st.number_input("Entregadores", min_value=0.0, value=float(linha["besteira"]) if pd.notna(linha["besteira"]) else 0.0, step=0.01)
             carro = st.number_input("Carro", min_value=0.0, value=float(linha["carro"]) if pd.notna(linha["carro"]) else 0.0, step=0.01)
 
         submitted = st.form_submit_button("Salvar")
@@ -1250,7 +1250,7 @@ with tab_res:
         <th>Total Ganhos</th>
         <th>Gasolina</th>
         <th>Almoço</th>
-        <th>Besteira</th>
+        <th>Entregadores</th>
         <th>Carro</th>
         <th>Total Gastos</th>
         <th>Lucro Diário</th>
