@@ -152,6 +152,25 @@ def marcar_usuario_pago(login: str):
         # Registra alteracao no append para persistir
         _append_alteracao(login, usuarios[login])
 
+def editar_usuario(login: str, nome: str = None, telefone: str = None, senha: str = None, pago: bool = None):
+    """Edita dados de um usuario existente."""
+    usuarios = carregar_usuarios()
+    login = login.strip().lower()
+    if login not in usuarios:
+        return False
+    if nome is not None:
+        usuarios[login]["nome"] = nome.strip()
+    if telefone is not None:
+        usuarios[login]["telefone"] = telefone.strip()
+    if senha is not None:
+        usuarios[login]["senha"] = senha.strip()
+    if pago is not None:
+        usuarios[login]["pago"] = bool(pago)
+    salvar_usuarios(usuarios)
+    _append_alteracao(login, usuarios[login])
+    return True
+
+
 def excluir_usuario(login: str):
     usuarios = carregar_usuarios()
     login = login.strip().lower()
@@ -372,7 +391,7 @@ def tela_admin():
     if usuario_sel:
         user_data = usuarios[usuario_sel]
         with col_acoes:
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
 
             with c1:
                 if not user_data.get("pago", False):
@@ -382,20 +401,54 @@ def tela_admin():
                         st.rerun()
                 else:
                     if st.button("Bloquear Acesso", use_container_width=True):
-                        usuarios[usuario_sel]["pago"] = False
-                        salvar_usuarios(usuarios)
+                        editar_usuario(usuario_sel, pago=False)
                         st.warning(f"Usuário **{usuario_sel}** bloqueado.")
                         st.rerun()
 
             with c2:
+                if st.button("Editar", use_container_width=True):
+                    st.session_state["editando_usuario"] = usuario_sel
+                    st.rerun()
+
+            with c3:
                 if st.button("Excluir Usuário", use_container_width=True):
                     excluir_usuario(usuario_sel)
                     st.error(f"Usuário **{usuario_sel}** excluído.")
                     st.rerun()
 
-            with c3:
+            with c4:
                 if st.button("Ver Dados", use_container_width=True):
                     st.json(user_data)
+
+    # Modal de edicao
+    if st.session_state.get("editando_usuario"):
+        login_edit = st.session_state["editando_usuario"]
+        if login_edit in usuarios:
+            st.markdown("---")
+            st.subheader(f"Editar Usuário: {login_edit}")
+            dados_atual = usuarios[login_edit]
+            
+            col_e1, col_e2 = st.columns(2)
+            with col_e1:
+                edit_nome = st.text_input("Nome Completo", value=dados_atual.get("nome", ""), key="edit_nome")
+                edit_telefone = st.text_input("Telefone", value=dados_atual.get("telefone", ""), key="edit_telefone")
+            with col_e2:
+                edit_senha = st.text_input("Senha", value=dados_atual.get("senha", ""), key="edit_senha")
+                edit_pago = st.checkbox("Pago?", value=dados_atual.get("pago", False), key="edit_pago")
+            
+            col_salvar, col_cancelar = st.columns([1, 1])
+            with col_salvar:
+                if st.button("Salvar Alterações", type="primary", use_container_width=True):
+                    editar_usuario(login_edit, nome=edit_nome, telefone=edit_telefone, senha=edit_senha, pago=edit_pago)
+                    st.success(f"Usuário **{login_edit}** atualizado!")
+                    st.session_state.pop("editando_usuario", None)
+                    st.rerun()
+            with col_cancelar:
+                if st.button("Cancelar", use_container_width=True):
+                    st.session_state.pop("editando_usuario", None)
+                    st.rerun()
+        else:
+            st.session_state.pop("editando_usuario", None)
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
