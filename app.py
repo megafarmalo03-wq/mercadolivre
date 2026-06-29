@@ -18,7 +18,7 @@ import time
 st.set_page_config(page_title="Gestão de Entregas 2.0", layout="wide")
 
 # ========== CONFIGURACOES DE PAGAMENTO ==========
-VALOR_PIX = 20.00
+VALOR_PIX = 50.00
 # Chave PIX: CPF 36785517850 — Diego
 
 # Funcao para gerar BR Code PIX valido
