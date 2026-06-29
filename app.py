@@ -190,6 +190,69 @@ def excluir_usuario(login: str):
             os.fsync(f.fileno())
 
 
+def listar_excluidos():
+    """Lista todos os usuarios que foram excluidos (tem registro de exclusao no append)."""
+    excluidos = {}
+    ultimo_estado = {}
+    if os.path.exists(USUARIOS_APPEND):
+        try:
+            with open(USUARIOS_APPEND, "r", encoding="utf-8") as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if not linha:
+                        continue
+                    try:
+                        registro = json.loads(linha)
+                        login = registro.get("login", "").strip().lower()
+                        if not login:
+                            continue
+                        tipo = registro.get("tipo", "cadastro")
+                        if tipo == "exclusao":
+                            # Guarda o ultimo estado conhecido antes da exclusao
+                            if login in ultimo_estado and login not in excluidos:
+                                excluidos[login] = ultimo_estado[login]
+                        else:
+                            # Atualiza o ultimo estado conhecido
+                            ultimo_estado[login] = registro.get("dados", {})
+                            # Se foi recriado apos exclusao, remove da lista de excluidos
+                            excluidos.pop(login, None)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    return excluidos
+
+def recuperar_usuario(login: str):
+    """Recupera um usuario excluido, recriando-o a partir do append."""
+    login = login.strip().lower()
+    ultimo_dados = None
+    if os.path.exists(USUARIOS_APPEND):
+        try:
+            with open(USUARIOS_APPEND, "r", encoding="utf-8") as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if not linha:
+                        continue
+                    try:
+                        registro = json.loads(linha)
+                        reg_login = registro.get("login", "").strip().lower()
+                        if reg_login == login:
+                            tipo = registro.get("tipo", "cadastro")
+                            if tipo != "exclusao":
+                                ultimo_dados = registro.get("dados", {})
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    if ultimo_dados:
+        usuarios = carregar_usuarios()
+        usuarios[login] = ultimo_dados
+        salvar_usuarios(usuarios)
+        _append_alteracao(login, ultimo_dados)
+        return True
+    return False
+
+
 # ========== LOGIN SISTEMA ==========
 USUARIOS_JSON = "usuarios.json"
 USUARIOS_APPEND = "usuarios_append.jsonl"  # Arquivo append-only (uma linha por usuario)
@@ -475,6 +538,28 @@ def tela_admin():
                 st.rerun()
             else:
                 st.error("Preencha todos os campos.")
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
+    # === USUARIOS EXCLUIDOS ===
+    excluidos = listar_excluidos()
+    if excluidos:
+        with st.expander(f"&#x1f5d1; Usuários Excluídos ({len(excluidos)})"):
+            st.caption("Usuários que foram excluídos mas podem ser recuperados.")
+            for login_excl, dados_excl in excluidos.items():
+                with st.container():
+                    c1, c2, c3 = st.columns([2, 3, 1])
+                    with c1:
+                        st.markdown(f"**<span style='color:#ef4444'>{login_excl}</span>**")
+                    with c2:
+                        st.caption(dados_excl.get("nome", ""))
+                    with c3:
+                        if st.button("Recuperar", key=f"recuperar_{login_excl}", type="primary"):
+                            if recuperar_usuario(login_excl):
+                                st.success(f"Usuário **{login_excl}** recuperado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error("Não foi possível recuperar o usuário.")
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
     if st.button("Sair do Painel", use_container_width=True):
