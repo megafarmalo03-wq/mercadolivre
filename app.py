@@ -140,58 +140,77 @@ def marcar_usuario_pago(login: str):
 
 # ========== LOGIN SISTEMA ==========
 USUARIOS_JSON = "usuarios.json"
+USUARIOS_APPEND = "usuarios_append.jsonl"  # Arquivo append-only (uma linha por usuario)
 
-def _backup_usuarios():
-    """Cria backup do arquivo de usuarios antes de qualquer alteracao."""
-    if os.path.exists(USUARIOS_JSON):
+def _ler_append():
+    """Le o arquivo append-only e retorna dict de usuarios."""
+    usuarios = {}
+    if os.path.exists(USUARIOS_APPEND):
         try:
-            backup_path = USUARIOS_JSON + ".backup"
-            shutil.copy2(USUARIOS_JSON, backup_path)
+            with open(USUARIOS_APPEND, "r", encoding="utf-8") as f:
+                for linha in f:
+                    linha = linha.strip()
+                    if not linha:
+                        continue
+                    try:
+                        registro = json.loads(linha)
+                        login = registro.get("login", "").strip().lower()
+                        if login:
+                            usuarios[login] = registro.get("dados", {})
+                    except Exception:
+                        continue
         except Exception:
             pass
+    return usuarios
 
-def salvar_usuarios(usuarios: dict):
-    """Salva usuarios no JSON sempre fazendo backup primeiro."""
-    _backup_usuarios()
-    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-        json.dump(usuarios, f, indent=4, ensure_ascii=False)
-    # Forca flush para garantir que os dados vao para o disco
-    # e verifica se o arquivo foi salvo corretamente
-    try:
-        with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
-            verifica = json.load(f)
-        if set(verifica.keys()) != set(usuarios.keys()):
-            st.error("ERRO CRITICO: O arquivo de usuarios nao foi salvo corretamente!")
-    except Exception as e:
-        st.error(f"ERRO ao verificar salvamento: {e}")
+def _append_usuario(login: str, dados: dict):
+    """Adiciona um usuario ao arquivo append-only (nunca sobrescreve)."""
+    registro = {
+        "login": login,
+        "dados": dados,
+        "timestamp": datetime.now().isoformat()
+    }
+    with open(USUARIOS_APPEND, "a", encoding="utf-8") as f:
+        f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
-def carregar_usuarios():
-    """Carrega usuarios do JSON. Nunca sobrescreve o arquivo existente."""
+def _reconstruir_json_principal():
+    """Reconstroi o usuarios.json a partir do append + json existente."""
+    # Le o JSON principal (se existir)
+    principal = {}
     if os.path.exists(USUARIOS_JSON):
         try:
             with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
-                dados = json.load(f)
-            # Garante que retorna um dict
-            if not isinstance(dados, dict):
-                return {}
-            return dados
+                principal = json.load(f)
         except Exception:
-            # Se o arquivo existir mas estiver corrompido, tenta recuperar do backup
-            backup_path = USUARIOS_JSON + ".backup"
-            if os.path.exists(backup_path):
-                try:
-                    with open(backup_path, "r", encoding="utf-8") as f:
-                        return json.load(f)
-                except Exception:
-                    pass
-            return {}
-    # Se o arquivo nao existe, cria apenas com o admin padrao
-    padrao = {
-        "diego": {"nome": "Diego", "senha": "diego123",
-                   "planilha": "Planilha de Ganhos - Diego.xlsx", "pago": True}
-    }
-    salvar_usuarios(padrao)
-    return padrao
+            principal = {}
+    
+    # Le o append (novos usuarios)
+    append = _ler_append()
+    
+    # Merge: append sobrescreve principal (usuarios mais recentes ganham)
+    merge = {**principal, **append}
+    
+    # Salva o merge de volta no JSON principal
+    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+        json.dump(merge, f, indent=4, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    
+    return merge
+
+def carregar_usuarios():
+    """Carrega usuarios do JSON, reconstruindo a partir do append se necessario."""
+    # Sempre reconstrui a partir do append para garantir consistencia
+    return _reconstruir_json_principal()
+
+def salvar_usuarios(usuarios: dict):
+    """Salva todos os usuarios no JSON principal (usado por admin)."""
+    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+        json.dump(usuarios, f, indent=4, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
@@ -210,24 +229,23 @@ def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
         st.error("Usuário já existe.")
         return
     planilha_nome = f"Planilha de Ganhos - {nome.title()}.xlsx"
-    usuarios[login] = {
+    dados_usuario = {
         "nome": nome,
         "senha": senha,
         "telefone": telefone,
         "planilha": planilha_nome,
         "pago": False
     }
+    # Salva no append-only (nunca perde dados)
+    _append_usuario(login, dados_usuario)
+    # Atualiza o JSON principal
+    usuarios[login] = dados_usuario
     salvar_usuarios(usuarios)
-    # Verificacao extra: recarrega do disco para confirmar
-    usuarios_verifica = carregar_usuarios()
-    if login not in usuarios_verifica:
-        st.error("ERRO: O usuario foi salvo mas nao aparece no arquivo!")
-        return
     garantir_planilha_usuario(planilha_nome)
     st.success(f"Conta criada! Usuario {login} salvo com sucesso.")
     # Redireciona para tela de pagamento
     st.session_state["tela"] = "pagamento"
-    st.session_state["usuario_pendente"] = {**usuarios[login], "login": login}
+    st.session_state["usuario_pendente"] = {**dados_usuario, "login": login}
     st.rerun()
 
 
