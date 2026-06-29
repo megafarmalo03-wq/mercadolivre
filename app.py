@@ -155,13 +155,26 @@ def salvar_usuarios(usuarios: dict):
     _backup_usuarios()
     with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
         json.dump(usuarios, f, indent=4, ensure_ascii=False)
+    # Forca flush para garantir que os dados vao para o disco
+    # e verifica se o arquivo foi salvo corretamente
+    try:
+        with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
+            verifica = json.load(f)
+        if set(verifica.keys()) != set(usuarios.keys()):
+            st.error("ERRO CRITICO: O arquivo de usuarios nao foi salvo corretamente!")
+    except Exception as e:
+        st.error(f"ERRO ao verificar salvamento: {e}")
 
 def carregar_usuarios():
     """Carrega usuarios do JSON. Nunca sobrescreve o arquivo existente."""
     if os.path.exists(USUARIOS_JSON):
         try:
             with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
-                return json.load(f)
+                dados = json.load(f)
+            # Garante que retorna um dict
+            if not isinstance(dados, dict):
+                return {}
+            return dados
         except Exception:
             # Se o arquivo existir mas estiver corrompido, tenta recuperar do backup
             backup_path = USUARIOS_JSON + ".backup"
@@ -205,8 +218,13 @@ def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
         "pago": False
     }
     salvar_usuarios(usuarios)
+    # Verificacao extra: recarrega do disco para confirmar
+    usuarios_verifica = carregar_usuarios()
+    if login not in usuarios_verifica:
+        st.error("ERRO: O usuario foi salvo mas nao aparece no arquivo!")
+        return
     garantir_planilha_usuario(planilha_nome)
-    st.success("Conta criada! Efetue o pagamento para liberar o acesso.")
+    st.success(f"Conta criada! Usuario {login} salvo com sucesso.")
     # Redireciona para tela de pagamento
     st.session_state["tela"] = "pagamento"
     st.session_state["usuario_pendente"] = {**usuarios[login], "login": login}
