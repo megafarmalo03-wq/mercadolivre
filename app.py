@@ -144,17 +144,26 @@ def marcar_usuario_pago(login: str):
 USUARIOS_JSON = "usuarios.json"
 
 def carregar_usuarios():
-    try:
-        with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        padrao = {
-            "diego": {"nome": "Diego", "senha": "diego123",
-                       "planilha": "Planilha de Ganhos - Diego.xlsx"}
-        }
-        with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
-            json.dump(padrao, f, indent=4, ensure_ascii=False)
-        return padrao
+    """Carrega usuarios do JSON. Nunca sobrescreve o arquivo existente."""
+    if os.path.exists(USUARIOS_JSON):
+        try:
+            with open(USUARIOS_JSON, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            # Se o arquivo existir mas estiver corrompido, faz backup e retorna vazio
+            try:
+                shutil.copy2(USUARIOS_JSON, USUARIOS_JSON + ".backup")
+            except Exception:
+                pass
+            return {}
+    # Se o arquivo nao existe, cria apenas com o admin padrao
+    padrao = {
+        "diego": {"nome": "Diego", "senha": "diego123",
+                   "planilha": "Planilha de Ganhos - Diego.xlsx", "pago": True}
+    }
+    with open(USUARIOS_JSON, "w", encoding="utf-8") as f:
+        json.dump(padrao, f, indent=4, ensure_ascii=False)
+    return padrao
 
 
 def criar_usuario(login: str, nome: str, senha: str, telefone: str = ""):
