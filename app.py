@@ -129,6 +129,19 @@ def validar_codigo_liberacao(login: str, codigo: str):
     return False
 
 
+def _append_alteracao(login: str, dados: dict):
+    """Registra uma alteracao (pago, excluido, etc) no append-only."""
+    registro = {
+        "login": login,
+        "dados": dados,
+        "timestamp": datetime.now().isoformat(),
+        "tipo": "alteracao"
+    }
+    with open(USUARIOS_APPEND, "a", encoding="utf-8") as f:
+        f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
 def marcar_usuario_pago(login: str):
     usuarios = carregar_usuarios()
     login = login.strip().lower()
@@ -136,6 +149,26 @@ def marcar_usuario_pago(login: str):
         usuarios[login]["pago"] = True
         usuarios[login].pop("codigo_liberacao", None)
         salvar_usuarios(usuarios)
+        # Registra alteracao no append para persistir
+        _append_alteracao(login, usuarios[login])
+
+def excluir_usuario(login: str):
+    usuarios = carregar_usuarios()
+    login = login.strip().lower()
+    if login in usuarios:
+        del usuarios[login]
+        salvar_usuarios(usuarios)
+        # Registra exclusao no append
+        registro = {
+            "login": login,
+            "dados": {},
+            "timestamp": datetime.now().isoformat(),
+            "tipo": "exclusao"
+        }
+        with open(USUARIOS_APPEND, "a", encoding="utf-8") as f:
+            f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
 
 # ========== LOGIN SISTEMA ==========
@@ -155,7 +188,14 @@ def _ler_append():
                     try:
                         registro = json.loads(linha)
                         login = registro.get("login", "").strip().lower()
-                        if login:
+                        if not login:
+                            continue
+                        tipo = registro.get("tipo", "cadastro")
+                        if tipo == "exclusao":
+                            # Remove o usuario
+                            usuarios.pop(login, None)
+                        else:
+                            # Cadastro ou alteracao: sobrescreve
                             usuarios[login] = registro.get("dados", {})
                     except Exception:
                         continue
@@ -349,8 +389,7 @@ def tela_admin():
 
             with c2:
                 if st.button("Excluir Usuário", use_container_width=True):
-                    del usuarios[usuario_sel]
-                    salvar_usuarios(usuarios)
+                    excluir_usuario(usuario_sel)
                     st.error(f"Usuário **{usuario_sel}** excluído.")
                     st.rerun()
 
