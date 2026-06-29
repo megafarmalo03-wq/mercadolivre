@@ -89,7 +89,7 @@ def garantir_planilha_usuario(caminho):
 
 
 # ========== CONFIGURACOES DE PAGAMENTO ==========
-VALOR_PIX = 20.00
+VALOR_PIX = 50.00
 PIX_CHAVE = "00020126580014BR.GOV.BCB.PIX0136diego@seudominio.com5204000053039865404{valor}5802BR5925Diego Gestao Entregas 2.06009SAOPAULO62070503***6304"  # Pix Copia-e-Cola de exemplo — SUBSTITUA PELO SEU
 
 def gerar_qrcode_pix(valor: float, chave: str = PIX_CHAVE, descricao: str = "Acesso Planilha de Ganhos"):
